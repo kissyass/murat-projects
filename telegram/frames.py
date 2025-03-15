@@ -9,6 +9,7 @@ import pandas as pd
 from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.types import InputPeerEmpty
 from telethon.errors import ChannelPrivateError, FloodWaitError
+import random
 
 # ---------------------------
 # Members Extraction Page
@@ -221,6 +222,11 @@ class DashboardFrame(tk.Frame):
                                       command=lambda: controller.show_frame(MembersFrame))
         self.fetch_button.pack(pady=5)
 
+        self.send_messages_button = tk.Button(
+            self.container, text="Send Messages", command=lambda: controller.show_frame(SendMessagesFrame)
+        )
+        self.send_messages_button.pack(pady=5)
+
         self.logout_button = tk.Button(self.container, text=self.controller.get_text("logout"),
                                        command=self.logout)
         self.logout_button.pack(pady=5)
@@ -404,3 +410,147 @@ class SignupFrame(tk.Frame):
             self.controller.show_frame(DashboardFrame)
         except Exception as e:
             messagebox.showerror(self.controller.get_text("login_error"), str(e))
+
+# ---------------------------
+# Send Messages Frame
+# ---------------------------
+class SendMessagesFrame(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        self.contacts_df = None
+        self.messages_df = None
+
+        self.container = tk.Frame(self, width=600, height=400)
+        self.container.place(relx=0.5, rely=0.5, anchor="center")
+
+        title_label = tk.Label(self.container, text="Send Messages", font=("Helvetica", 16))
+        title_label.pack(pady=10)
+
+        # Button to upload contacts file
+        self.upload_contacts_button = tk.Button(
+            self.container, text="Upload Contacts CSV/Excel", command=self.upload_contacts
+        )
+        self.upload_contacts_button.pack(pady=5)
+        self.contacts_label = tk.Label(self.container, text="No contacts file loaded")
+        self.contacts_label.pack(pady=2)
+
+        # Button to upload messages file
+        self.upload_messages_button = tk.Button(
+            self.container, text="Upload Messages CSV/Excel", command=self.upload_messages
+        )
+        self.upload_messages_button.pack(pady=5)
+        self.messages_label = tk.Label(self.container, text="No messages file loaded")
+        self.messages_label.pack(pady=2)
+
+        # Delay range settings
+        delay_frame = tk.Frame(self.container)
+        delay_frame.pack(pady=5)
+        min_label = tk.Label(delay_frame, text="Min delay (seconds):")
+        min_label.pack(side=tk.LEFT, padx=5)
+        self.min_delay_entry = tk.Entry(delay_frame, width=5)
+        self.min_delay_entry.insert(0, "60")
+        self.min_delay_entry.pack(side=tk.LEFT, padx=5)
+        max_label = tk.Label(delay_frame, text="Max delay (seconds):")
+        max_label.pack(side=tk.LEFT, padx=5)
+        self.max_delay_entry = tk.Entry(delay_frame, width=5)
+        self.max_delay_entry.insert(0, "180")
+        self.max_delay_entry.pack(side=tk.LEFT, padx=5)
+
+        # Start sending messages button
+        self.send_button = tk.Button(
+            self.container, text="Start Sending Messages", command=self.start_sending
+        )
+        self.send_button.pack(pady=10)
+
+        # Back button
+        self.back_button = tk.Button(
+            self.container, text="Back", command=lambda: controller.show_frame(DashboardFrame)
+        )
+        self.back_button.pack(pady=5)
+
+    def upload_contacts(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx *.xls")]
+        )
+        if file_path:
+            try:
+                if file_path.lower().endswith(('.xls', '.xlsx')):
+                    self.contacts_df = pd.read_excel(file_path)
+                else:
+                    self.contacts_df = pd.read_csv(file_path)
+                self.contacts_label.config(text=f"Loaded contacts: {file_path.split('/')[-1]}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load contacts file: {e}")
+
+    def upload_messages(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx *.xls")]
+        )
+        if file_path:
+            try:
+                if file_path.lower().endswith(('.xls', '.xlsx')):
+                    self.messages_df = pd.read_excel(file_path)
+                else:
+                    self.messages_df = pd.read_csv(file_path)
+                self.messages_label.config(text=f"Loaded messages: {file_path.split('/')[-1]}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load messages file: {e}")
+
+    def start_sending(self):
+        # Check if both files are loaded
+        if self.contacts_df is None:
+            messagebox.showwarning("Input Error", "Please upload a contacts file.")
+            return
+        if self.messages_df is None:
+            messagebox.showwarning("Input Error", "Please upload a messages file.")
+            return
+
+        # Validate delay settings
+        try:
+            min_delay = int(self.min_delay_entry.get())
+            max_delay = int(self.max_delay_entry.get())
+            if min_delay > max_delay:
+                messagebox.showwarning("Input Error", "Minimum delay cannot be greater than maximum delay.")
+                return
+        except ValueError:
+            messagebox.showwarning("Input Error", "Please enter valid numbers for delays.")
+            return
+
+        # Find the username column case-insensitively
+        username_col = None
+        for col in self.contacts_df.columns:
+            if col.lower() == 'username':
+                username_col = col
+                break
+        if username_col is None:
+            messagebox.showwarning("Input Error", "Contacts file must contain a 'username' column.")
+            return
+
+        valid_contacts = self.contacts_df[self.contacts_df[username_col].notnull()]
+        if valid_contacts.empty:
+            messagebox.showinfo("Info", "No contacts with username found.")
+            return
+
+        # Extract messages list (assumes messages are in the first column)
+        messages = self.messages_df.iloc[:, 0].dropna().tolist()
+        if not messages:
+            messagebox.showwarning("Input Error", "No messages found in the messages file.")
+            return
+
+        # Start sending messages asynchronously
+        asyncio.get_event_loop().create_task(self.send_messages(valid_contacts, messages, min_delay, max_delay, username_col))
+
+    async def send_messages(self, contacts, messages, min_delay, max_delay, username_col):
+        for index, row in contacts.iterrows():
+            username = row[username_col]
+            # Randomly choose a message from the messages list
+            message_text = random.choice(messages)
+            try:
+                await self.controller.client.send_message(username, message_text)
+            except Exception as e:
+                print(f"Failed to send message to {username}: {e}")
+            # Wait for a random delay between min_delay and max_delay seconds
+            delay = random.randint(min_delay, max_delay)
+            await asyncio.sleep(delay)
+        messagebox.showinfo("Info", "Finished sending messages.")

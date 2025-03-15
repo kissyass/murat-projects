@@ -3,7 +3,7 @@ from tkinter import ttk
 import asyncio
 from translations import translations
 from database import init_db
-from frames import SignupFrame, MainMenuFrame, DashboardFrame, MembersFrame
+from frames import SignupFrame, MainMenuFrame, DashboardFrame, MembersFrame, SendMessagesFrame
 
 # ---------------------------
 # Tkinter Application Setup
@@ -34,7 +34,7 @@ class App(tk.Tk):
 
         # Register all frames
         self.frames = {}
-        for F in (MainMenuFrame, SignupFrame, DashboardFrame, MembersFrame):
+        for F in (MainMenuFrame, SignupFrame, DashboardFrame, MembersFrame, SendMessagesFrame):
             frame = F(parent=self.container, controller=self)
             self.frames[F] = frame
             frame.place(x=0, y=0, relwidth=1, relheight=1)
