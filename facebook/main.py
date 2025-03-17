@@ -329,7 +329,7 @@ def process_file():
                 current += 1
                 progress_bar["value"] = current
                 root.update_idletasks()
-                time.sleep(random.uniform(10, 25))
+                time.sleep(random.uniform(5, 15))
     except Exception as e:
         messagebox.showerror("Error", f"{UI_STRINGS['errSelenium'][CURRENT_LANG]}{e}")
     finally:
