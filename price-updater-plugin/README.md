@@ -20,6 +20,7 @@ This program aggregates hotel prices from four different websites by retrieving 
 ## Configuration Files
 
 - **`env.txt`:**
+
   This file holds the configuration for the target website where the data will be uploaded. An example `env.txt`:
   1. https://wawday.com/ # Website domain
   2. https://wawday.com/test-page/ # Page for uploading prices
