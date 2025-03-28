@@ -324,6 +324,7 @@ def process_file():
 
         for grp in unique_groups:
             if grp:
+                print(grp)
                 info = scrape_group_info(grp, driver)
                 group_info[grp] = info
                 current += 1
