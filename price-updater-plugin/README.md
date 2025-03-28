@@ -20,11 +20,11 @@ This program aggregates hotel prices from four different websites by retrieving 
 ## Configuration Files
 
 - **`env.txt`:**
--- This file holds the configuration for the target website where the data will be uploaded. An example `env.txt`:
--- https://wawday.com/ # Website domain
-  https://wawday.com/test-page/ # Page for uploading prices
-  yasem # Username for the website
-  N6bS XIcl HSR7 x69O QwUm Ya5p # Password for the website
+  This file holds the configuration for the target website where the data will be uploaded. An example `env.txt`:
+  1. https://wawday.com/ # Website domain
+  2. https://wawday.com/test-page/ # Page for uploading prices
+  3. yasem # Username for the website
+  4. N6bS XIcl HSR7 x69O QwUm Ya5p # Password for the website
 - **Logos:**  
 Place your logo PNG files in the designated directory (e.g., `logos/`).
 
