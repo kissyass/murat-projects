@@ -468,7 +468,7 @@ class App:
         progress.pack(pady=10)
         progress.start()
 
-        self.topic_pd = self.topic_entry.get().strip()
+        self.content_topic = self.topic_entry.get().strip()
         self.price = self.price_entry.get().strip()
         self.stock = self.stock_entry.get().strip()
 
@@ -478,7 +478,7 @@ class App:
         else:
             self.elementor = elements_text.splitlines()
 
-        if not self.topic_pd:
+        if not self.content_topic:
             messagebox.showerror(self.translations["error"], self.translations["enter_topic"])
             return
         
@@ -486,16 +486,16 @@ class App:
 
         try:
             messagebox.showinfo(self.translations["processing"], self.translations["wait_minute_pd"])
-            self.generated_seo_metadata = generate_seo_metadata(self.topic_pd, 'product description', self.client, language=content_language)
+            self.generated_seo_metadata = generate_seo_metadata(self.content_topic, 'product description', self.client, language=content_language)
             self.generated_article = generate_article(
-                self.topic_pd,
+                self.content_topic,
                 self.generated_seo_metadata,
                 self.client,
                 account_id=self.account_id,
                 content_type="product_description",
                 language=content_language
             )
-            self.generated_images = generate_image_prompts_and_images(self.topic_pd, self.generated_seo_metadata, "product_description", self.client, language=content_language)
+            self.generated_images = generate_image_prompts_and_images(self.content_topic, self.generated_seo_metadata, "product_description", self.client, language=content_language)
             
             progress.stop()
             progress.destroy()
@@ -558,7 +558,7 @@ class App:
         conn.close()
 
         messagebox.showinfo(self.translations["success"], self.translations["add_data_folder_success"])
-        self.setup_article_frame() 
+        self.show_content_selection_frame() 
 
     def generate_content(self, account_id):
         """Generates SEO metadata, article, and images."""
@@ -570,7 +570,7 @@ class App:
         progress.pack(pady=10)
         progress.start()
 
-        topic = self.topic_entry.get().strip()
+        self.content_topic = self.topic_entry.get().strip()
 
         elements_text = self.elementor_elements_entry.get("1.0", "end-1c").strip()
         if not elements_text:
@@ -578,7 +578,7 @@ class App:
         else:
             self.elementor = elements_text.splitlines()
 
-        if not topic:
+        if not self.content_topic:
             messagebox.showerror(self.translations["error"], self.translations["enter_topic"])
             return
         
@@ -587,10 +587,10 @@ class App:
         
         try:
             messagebox.showinfo(self.translations["processing"], self.translations["wait_minute_article"])
-            self.generated_seo_metadata = generate_seo_metadata(topic, "article", self.client, language=content_language)
+            self.generated_seo_metadata = generate_seo_metadata(self.content_topic, "article", self.client, language=content_language)
             use_additional_data = getattr(self, "use_additional_data", BooleanVar(value=False)).get()
-            self.generated_article = generate_article(topic, self.generated_seo_metadata, self.client, account_id if use_additional_data else None, "article", language=content_language)
-            self.generated_images = generate_image_prompts_and_images(topic, self.generated_seo_metadata, "article", self.client, language=content_language)
+            self.generated_article = generate_article(self.content_topic, self.generated_seo_metadata, self.client, account_id if use_additional_data else None, "article", language=content_language)
+            self.generated_images = generate_image_prompts_and_images(self.content_topic, self.generated_seo_metadata, "article", self.client, language=content_language)
             
             progress.stop()
             progress.destroy()
@@ -627,7 +627,7 @@ class App:
         conn.close()
 
         messagebox.showinfo(self.translations["success"], self.translations["add_data_folder_upload_success"])
-        self.setup_article_frame() 
+        self.show_content_selection_frame() 
     
     def get_or_create_tag(self, tag_name):
         # Check if the tag already exists
@@ -637,10 +637,19 @@ class App:
             # Tag exists, return its ID
             return response.json()[0]["id"]
         
+        # If the tag does not exist, create it with Rank Math meta data included
+        create_data = {
+            "name": tag_name,
+            "description": tag_name,
+            "meta": {
+                "rank_math_focus_keyword": tag_name,
+            }
+        }
+        
         # Tag doesn't exist, create it
         response = requests.post(
             f"{self.wp_base_url}/wp-json/wp/v2/tags",
-            json={"name": tag_name},
+            json=create_data,
             auth=self.auth
         )
         
@@ -698,7 +707,7 @@ class App:
             adjusted_keywords, plain_text = self.adjust_keyword_density(article_html, focus_keywords, content_type="article")
 
             post_data = {
-                "title": self.generated_seo_metadata["SEO Title"],
+                "title": self.content_topic,
                 "content": article_html,
                 "status": "publish",
                 "slug": self.generated_seo_metadata["URL Slug"],
@@ -768,10 +777,19 @@ class App:
             # Tag exists, return its ID as a dictionary
             return {"id": response.json()[0]["id"]}
         
+        # If the tag does not exist, create it with Rank Math meta data included
+        create_data = {
+            "name": tag_name,
+            "description": tag_name,
+            "meta": {
+                "rank_math_focus_keyword": tag_name,
+            }
+        }
+        
         # Tag doesn't exist, create it
         response = requests.post(
             f"{self.wp_base_url}/wp-json/wc/v3/products/tags",
-            json={"name": tag_name},
+            json=create_data,
             auth=self.auth
         )
         
@@ -831,13 +849,12 @@ class App:
             
             article_html = self.insert_elementor_elements(article_html, self.elementor)
 
-            topic = self.topic_pd
             price = self.price
             stock = self.stock
 
             # Prepare product data
             post_data = {
-                "name": topic,
+                "name": self.content_topic,
                 "type": "simple",
                 "regular_price": str(price),
                 "description": article_html,
@@ -1115,7 +1132,7 @@ class App:
         def generate_and_schedule_article(topic, delay):
             try:
                 self.generated_seo_metadata = generate_seo_metadata(topic, "article", self.client, language=content_language)
-                use_additional_data = self.use_additional_data.get()
+                use_additional_data = getattr(self, "use_additional_data", BooleanVar(value=False)).get()
                 self.generated_article = generate_article(topic, self.generated_seo_metadata, self.client, account_id if use_additional_data else None, "article", language=content_language)
                 self.generated_images = generate_image_prompts_and_images(topic, self.generated_seo_metadata, "article", self.client, language=content_language)
                 self.schedule_post()
@@ -1129,6 +1146,7 @@ class App:
         messagebox.showinfo(self.translations["processing"], self.translations["wait_bulk_articles"])
 
         for topic in topics:
+            self.content_topic = topic
             delay = random.randint(min_time * 60, max_time * 60)  # Convert minutes to seconds
             generate_and_schedule_article(topic, delay)
 
@@ -1175,7 +1193,7 @@ class App:
             adjusted_keywords, plain_text = self.adjust_keyword_density(article_html, focus_keywords, content_type="article")
 
             post_data = {
-                "title": self.generated_seo_metadata["SEO Title"],
+                "title": self.content_topic,
                 "content": article_html,
                 "status": "publish",
                 "slug": self.generated_seo_metadata["URL Slug"],
