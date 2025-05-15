@@ -4,63 +4,14 @@ from tkinter import ttk
 import pandas as pd
 import random
 import time
+import math
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import requests
-
-# Global variables for files, data, and reports
-uploaded_links_file = ""
-links = []
-uploaded_proxies_file = ""
-proxies = []
-logs = []
-report_data = []
-
-def center_window(win):
-    win.update_idletasks()
-    width = win.winfo_width()
-    height = win.winfo_height()
-    x = (win.winfo_screenwidth() // 2) - (width // 2)
-    y = (win.winfo_screenheight() // 2) - (height // 2)
-    win.geometry(f"{width}x{height}+{x}+{y}")
-
-def upload_links_file():
-    global uploaded_links_file, links
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Excel files", "*.xlsx"), ("Excel files", "*.xls"), ("CSV files", "*.csv")]
-    )
-    if file_path:
-        uploaded_links_file = file_path
-        links_label.config(text=f"Links File: {uploaded_links_file}")
-        try:
-            # Use header=None so that the first row is not skipped even if there is no header.
-            if file_path.endswith(".csv"):
-                df = pd.read_csv(file_path, header=None)
-            else:
-                df = pd.read_excel(file_path, header=None)
-            # Extract links from the first column
-            links = df.iloc[:, 0].dropna().tolist()
-            messagebox.showinfo("File Uploaded", f"Links file uploaded with {len(links)} links found.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to process links file: {e}")
-
-def upload_proxies_file():
-    global uploaded_proxies_file, proxies
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Excel files", "*.xlsx"), ("Excel files", "*.xls"), ("CSV files", "*.csv")]
-    )
-    if file_path:
-        uploaded_proxies_file = file_path
-        proxies_label.config(text=f"Proxies File: {uploaded_proxies_file}")
-        try:
-            if file_path.endswith(".csv"):
-                df = pd.read_csv(file_path, header=None)
-            else:
-                df = pd.read_excel(file_path, header=None)
-            proxies = df.iloc[:, 0].dropna().tolist()
-            messagebox.showinfo("File Uploaded", f"Proxies file uploaded with {len(proxies)} proxies found.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to process proxies file: {e}")
 
 def extract_ip(proxy):
     try:
@@ -77,7 +28,6 @@ def extract_ip(proxy):
 
 def get_country(ip):
     try:
-        # Free API to fetch country info for an IP
         response = requests.get(f"http://ip-api.com/json/{ip}", timeout=5)
         data = response.json()
         if data.get("status") == "success":
@@ -87,173 +37,374 @@ def get_country(ip):
     except Exception:
         return "Unknown"
 
-def process_link(link, proxy, min_time, max_time, headless):
-    chrome_options = Options()
-    chrome_options.add_argument(f'--proxy-server={proxy}')
-    if headless:
-        chrome_options.add_argument('--headless')
-    # Create the webdriver instance (ensure chromedriver is in PATH)
-    driver = webdriver.Chrome(options=chrome_options)
-    start_time = time.time()
+# Global variables for file paths, links, proxies, and report data.
+uploaded_links_file = ""
+links = []
+uploaded_proxies_file = ""
+proxies_list = []
+report_data = []
+next_link_index = 0  # pointer into links list
+
+def center_window(win):
+    win.update_idletasks()
+    width = win.winfo_width()
+    height = win.winfo_height()
+    x = (win.winfo_screenwidth() // 2) - (width // 2)
+    y = (win.winfo_screenheight() // 2) - (height // 2)
+    win.geometry(f"{width}x{height}+{x}+{y}")
+
+def upload_links_file():
+    global uploaded_links_file, links, next_link_index
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Excel files", "*.xlsx"), ("Excel files", "*.xls"), ("CSV files", "*.csv")]
+    )
+    if file_path:
+        uploaded_links_file = file_path
+        links_file_label.config(text=f"Links File: {uploaded_links_file}")
+        try:
+            if file_path.endswith(".csv"):
+                df = pd.read_csv(file_path, header=None)
+            else:
+                df = pd.read_excel(file_path, header=None)
+            links = df.iloc[:, 0].dropna().tolist()
+            next_link_index = 0
+            messagebox.showinfo("File Uploaded", f"Uploaded with {len(links)} links found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load links file: {e}")
+
+def format_proxy(proxy_line):
+    # Expecting format: IP:port:username:password
+    parts = proxy_line.split(":")
+    if len(parts) >= 4:
+        ip, port, username, password = parts[:4]
+        return f"http://{username}:{password}@{ip}:{port}"
+    else:
+        return proxy_line
+
+def upload_proxies_file():
+    global uploaded_proxies_file, proxies_list
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Excel files", "*.xlsx"), ("Excel files", "*.xls"), ("CSV files", "*.csv")]
+    )
+    if file_path:
+        uploaded_proxies_file = file_path
+        proxies_file_label.config(text=f"Proxies File: {uploaded_proxies_file}")
+        try:
+            if file_path.endswith(".csv"):
+                df = pd.read_csv(file_path, header=None)
+            else:
+                df = pd.read_excel(file_path, header=None)
+            proxies_list = [format_proxy(line.strip()) for line in df.iloc[:, 0].dropna().tolist()]
+            print(proxies_list)
+            messagebox.showinfo("File Uploaded", f"Uploaded with {len(proxies_list)} proxies found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load proxies file: {e}")
+
+def open_tab(driver, link, overall_range, proxy):
+    """
+    Opens a new tab and attempts to load the link.
+    Waits for the element with id 'listeo_logo' to appear.
+    Returns a dict with timing data if successful, or with "failed": True.
+    overall_range: (min_overall, max_overall) in seconds.
+    """
+    overall_time = random.randint(int(overall_range[0]), int(overall_range[1]))
+    phase1 = random.randint(30, 60)
+    phase2 = random.randint(30, 60)
+    if overall_time < (phase1 + phase2 + 60):
+        overall_time = phase1 + phase2 + 60
+    phase3 = overall_time - (phase1 + phase2)
+    start = time.time()
+
+    driver.execute_script("window.open();")
+    handle = driver.window_handles[-1]
+    driver.switch_to.window(handle)
+    driver.set_page_load_timeout(30)
     try:
         driver.get(link)
-        time.sleep(3)  # Wait for page load
-        
-        # Determine a random duration (in seconds) to simulate user scrolling
-        random_duration = random.randint(min_time, max_time)
-        end_time = time.time() + random_duration
-        # Simulate user scrolling in small increments until the random duration elapses
-        while time.time() < end_time:
-            driver.execute_script("window.scrollBy(0, 200);")
-            time.sleep(1)
-            
-        total_time = time.time() - start_time
-        ip = extract_ip(proxy)
-        country = get_country(ip)
-        log_message = f"Link '{link}' processed by IP {proxy} ({country}) in {total_time:.2f} sec."
-        return total_time, country, log_message
-    except Exception as e:
-        ip = extract_ip(proxy)
-        country = get_country(ip)
-        error_message = f"Error processing '{link}' using proxy {proxy} ({country}): this IP doesn't work. ({e})"
-        print(error_message)
-        return None, country, error_message
-    finally:
-        driver.quit()
-
-def process_file():
-    global logs, report_data
-    if not links:
-        messagebox.showwarning("Warning", "Please upload a links file first.")
-        return
-    if not proxies:
-        messagebox.showwarning("Warning", "Please upload a proxies file first.")
-        return
+    except (TimeoutException, WebDriverException) as e:
+        return {"failed": True, "link": link, "error": str(e)}
     
     try:
-        min_time = int(min_time_entry.get())
-        max_time = int(max_time_entry.get())
-        if min_time > max_time:
-            messagebox.showerror("Error", "Minimum time cannot be greater than maximum time.")
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "listeo_logo")))
+    except TimeoutException:
+        return {"failed": True, "link": link, "error": "Logo element not loaded (timeout)."}
+    
+    time.sleep(3)
+    current_url = driver.current_url.lower()
+    if "gstatic.com/generate_204" in current_url or "connect" in current_url:
+        return {"failed": True, "link": link, "error": "Captive portal or connectivity check encountered."}
+    try:
+        page_height = driver.execute_script("return document.body.scrollHeight;")
+    except Exception:
+        page_height = 1000
+    page_middle = page_height / 2
+
+    return {
+        "failed": False,
+        "link": link,
+        "handle": handle,
+        "start": start,
+        "phase1_duration": phase1,
+        "phase2_duration": phase2,
+        "phase3_duration": phase3,
+        "phase1_end": start + phase1,
+        "phase2_end": start + phase1 + phase2,
+        "overall_end": start + overall_time,
+        "page_middle": page_middle,
+        "launched_next": False,
+        "middle_set": False,
+        "overall_duration": overall_time
+    }
+
+def perform_phase1(tab, driver):
+    driver.execute_script("window.scrollBy(0, arguments[0]);", random.choice([200, -200]))
+
+def perform_phase2(tab, driver):
+    elapsed = time.time() - tab["phase1_end"]
+    fraction = elapsed / tab["phase2_duration"]
+    fraction = min(fraction, 1)
+    try:
+        page_height = driver.execute_script("return document.body.scrollHeight;")
+    except Exception:
+        page_height = tab["page_middle"] * 2
+    new_position = fraction * page_height
+    driver.execute_script("window.scrollTo(0, arguments[0]);", new_position)
+
+def process_links():
+    global report_data, next_link_index
+    if not links:
+        messagebox.showwarning("Warning", "Please upload a file with links first.")
+        return
+    if not proxies_list:
+        messagebox.showwarning("Warning", "Please upload a file with proxies first.")
+        return
+    try:
+        min_overall = float(min_overall_entry.get()) * 60
+        max_overall = float(max_overall_entry.get()) * 60
+        if min_overall > max_overall:
+            messagebox.showerror("Error", "Minimum overall time cannot be greater than maximum overall time.")
             return
     except Exception:
-        messagebox.showerror("Error", "Please enter valid integer times (in seconds).")
+        messagebox.showerror("Error", "Please enter valid overall time values (in minutes).")
         return
 
+    overall_range = (min_overall, max_overall)
     headless = headless_var.get()
-    logs.clear()
+
+    total_tasks = len(proxies_list) * len(links)
+    progress_bar['maximum'] = total_tasks
+    progress_count = 0
     report_data.clear()
 
-    total_tasks = len(links) * len(proxies)
-    current_task = 0
-    progress_bar['maximum'] = total_tasks
-    progress_bar['value'] = 0
+    # For each proxy, open a new Chrome session and process all links concurrently.
+    for proxy in proxies_list:
+        print(proxy)
+        chrome_options = Options()
+        # chrome_options.add_argument("--proxy-bypass-list=*")
+        chrome_options.add_argument("--proxy-auto-detect=false")
+        chrome_options.add_argument("--ignore-certificate-errors")
+        chrome_options.add_argument(f'--proxy-server={proxy}')
+        if headless:
+            chrome_options.add_argument('--headless')
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36")
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+        except Exception as e:
+            country = get_country(extract_ip(proxy))
+            for link in links:
+                report_data.append({
+                    "Link": link,
+                    "Proxy": proxy,
+                    "Country": country,
+                    "Scrolling Up/Down (min)": "Failed to open the page",
+                    "Scrolling Top-to-Bottom (min)": "Failed to open the page",
+                    "Staying Still (min)": "Failed to open the page",
+                    "Overall (min)": "Failed to open the page"
+                })
+                progress_count += 1
+                progress_bar['value'] = progress_count
+                root.update_idletasks()
+            continue
 
-    for link in links:
-        logs.append(f"Processing link: {link}")
-        for proxy in proxies:
-            logs.append(f"Trying proxy: {proxy} for link: {link}")
-            total_time, country, message = process_link(link, proxy, min_time, max_time, headless)
-            logs.append(message)
-            report_data.append({
-                "Link": link,
-                "IP": proxy,
-                "Country": country,
-                "Time Spent (s)": total_time if total_time is not None else "Failed"
-            })
-            current_task += 1
-            progress_bar['value'] = current_task
-            progress_label.config(text=f"Progress: {current_task}/{total_tasks}")
-            root.update_idletasks()  # Update GUI
+        driver.get("about:blank")
+        base_handle = driver.current_window_handle  # Save the base tab.
+        country = get_country(extract_ip(proxy))
+        open_tabs = []  # List of tabs currently processing.
+        next_link_index = 0  # For this proxy, process all links.
 
+        # Open first link.
+        if next_link_index < len(links):
+            tab_data = open_tab(driver, links[next_link_index], overall_range, proxy)
+            next_link_index += 1
+            if tab_data.get("failed", False):
+                report_data.append({
+                    "Link": links[next_link_index-1],
+                    "Proxy": proxy,
+                    "Country": country,
+                    "Scrolling Up/Down (min)": "Failed to open the page",
+                    "Scrolling Top-to-Bottom (min)": "Failed to open the page",
+                    "Staying Still (min)": "Failed to open the page",
+                    "Overall (min)": "Failed to open the page"
+                })
+                progress_count += 1
+                progress_bar['value'] = progress_count
+                root.update_idletasks()
+            else:
+                tab_data["proxy"] = proxy
+                open_tabs.append(tab_data)
+
+        # Now run a loop to concurrently update all open tabs.
+        while open_tabs or next_link_index < len(links):
+            now = time.time()
+            # Process each open tab.
+            for tab in open_tabs[:]:
+                try:
+                    driver.switch_to.window(tab["handle"])
+                except Exception:
+                    open_tabs.remove(tab)
+                    continue
+
+                if now < tab["phase1_end"]:
+                    perform_phase1(tab, driver)
+                elif now < tab["phase2_end"]:
+                    perform_phase2(tab, driver)
+                    # As soon as a tab finishes Phase 2, if there is another link, open it.
+                    if (not tab.get("launched_next", False)) and (next_link_index < len(links)):
+                        new_tab = open_tab(driver, links[next_link_index], overall_range, proxy)
+                        next_link_index += 1
+                        if new_tab.get("failed", False):
+                            report_data.append({
+                                "Link": links[next_link_index-1],
+                                "Proxy": proxy,
+                                "Country": country,
+                                "Scrolling Up/Down (min)": "Failed to open the page",
+                                "Scrolling Top-to-Bottom (min)": "Failed to open the page",
+                                "Staying Still (min)": "Failed to open the page",
+                                "Overall (min)": "Failed to open the page"
+                            })
+                            progress_count += 1
+                            progress_bar['value'] = progress_count
+                            root.update_idletasks()
+                        else:
+                            new_tab["proxy"] = proxy
+                            open_tabs.append(new_tab)
+                            tab["launched_next"] = True
+                elif now < tab["overall_end"]:
+                    if not tab["middle_set"]:
+                        driver.execute_script("window.scrollTo(0, arguments[0]);", tab["page_middle"])
+                        tab["middle_set"] = True
+                    # Tab remains in Phase 3 concurrently.
+                else:
+                    # Overall time expired; close tab and record.
+                    try:
+                        driver.close()
+                    except Exception:
+                        pass
+                    report_data.append({
+                        "Link": tab["link"],
+                        "Proxy": proxy,
+                        "Country": country,
+                        "Scrolling Up/Down (min)": round(tab["phase1_duration"] / 60, 2),
+                        "Scrolling Top-to-Bottom (min)": round(tab["phase2_duration"] / 60, 2),
+                        "Staying Still (min)": round(tab["phase3_duration"] / 60, 2),
+                        "Overall (min)": round(tab["overall_duration"] / 60, 2)
+                    })
+                    open_tabs.remove(tab)
+                    # Switch back to base tab.
+                    driver.switch_to.window(base_handle)
+                    progress_count += 1
+                    progress_bar['value'] = progress_count
+                    root.update_idletasks()
+            time.sleep(0.5)
+        driver.quit()
+        time.sleep(5)
+    progress_bar['value'] = total_tasks
     show_report_window()
 
 def show_report_window():
     report_win = tk.Toplevel(root)
     report_win.title("Processing Report")
-    report_win.geometry("800x400")
-    
-    # Create a scrolled text widget to display the report as a table
+    report_win.geometry("900x400")
     st = scrolledtext.ScrolledText(report_win, wrap=tk.NONE, font=("Courier", 10))
     st.pack(expand=True, fill='both')
-    
-    # Prepare header and separator row
-    header = f"{'Link':60} | {'IP':20} | {'Country':20} | {'Time Spent (s)':15}\n"
-    separator = "-" * 130 + "\n"
+    header = (f"{'Link':60} | {'Proxy/IP':20} | {'Country':15} | "
+              f"{'Scrolling Up/Down (min)':>25} | {'Scrolling Top-to-Bottom (min)':>30} | "
+              f"{'Staying Still (min)':>20} | {'Overall (min)':>15}\n")
+    separator = "-" * 160 + "\n"
     st.insert(tk.END, header)
     st.insert(tk.END, separator)
-    # Insert report data rows
     for row in report_data:
-        link = row["Link"][:57] + "..." if len(row["Link"]) > 60 else row["Link"]
-        ip = row["IP"]
-        country = row["Country"]
-        time_spent = row["Time Spent (s)"]
-        line = f"{link:60} | {ip:20} | {country:20} | {str(time_spent):15}\n"
+        sc_ud = row["Scrolling Up/Down (min)"]
+        sc_td = row["Scrolling Top-to-Bottom (min)"]
+        still = row["Staying Still (min)"]
+        overall = row["Overall (min)"]
+        if isinstance(sc_ud, (float, int)):
+            sc_ud = f"{sc_ud:.2f}"
+        if isinstance(sc_td, (float, int)):
+            sc_td = f"{sc_td:.2f}"
+        if isinstance(still, (float, int)):
+            still = f"{still:.2f}"
+        if isinstance(overall, (float, int)):
+            overall = f"{overall:.2f}"
+        line = (f"{row['Link'][:60]:60} | {row['Proxy'][:20]:20} | {row['Country'][:15]:15} | "
+                f"{sc_ud:25} | {sc_td:30} | {still:20} | {overall:15}\n")
         st.insert(tk.END, line)
-    
-    # Button to download the report as an Excel file
-    download_btn = tk.Button(report_win, text="Download Report", command=save_report)
-    download_btn.pack(pady=10)
 
-def save_report():
-    if not report_data:
-        messagebox.showwarning("Warning", "No report data to save.")
-        return
-    df = pd.DataFrame(report_data)
-    file_path = filedialog.asksaveasfilename(defaultextension=".xlsx",
-                                             filetypes=[("Excel files", "*.xlsx")])
-    if file_path:
-        try:
-            df.to_excel(file_path, index=False)
-            messagebox.showinfo("Report Saved", f"Report successfully saved at {file_path}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save report: {e}")
+def clear_data():
+    global uploaded_links_file, links, uploaded_proxies_file, proxies_list, report_data, next_link_index
+    uploaded_links_file = ""
+    links = []
+    uploaded_proxies_file = ""
+    proxies_list = []
+    report_data = []
+    next_link_index = 0
+    links_file_label.config(text="No links file uploaded.")
+    proxies_file_label.config(text="No proxies file uploaded.")
+    progress_bar['value'] = 0
 
-# --------------------------
-# Set up the main Tkinter window
+# -------------------------
+# Set up the main Tkinter window.
 root = tk.Tk()
-root.title("Link Processor")
-root.geometry("600x550")
-center_window(root)
+root.title("Link Engagement Simulator with Proxies")
+root.geometry("500x650")
+def center_and_set(win): 
+    center_window(win)
+center_and_set(root)
 
-# Upload buttons for links and proxies
 upload_links_button = tk.Button(root, text="Upload Links File", command=upload_links_file)
-upload_links_button.pack(pady=5)
-links_label = tk.Label(root, text="No links file uploaded.")
-links_label.pack(pady=5)
+upload_links_button.pack(pady=10)
+links_file_label = tk.Label(root, text="No links file uploaded.")
+links_file_label.pack()
 
 upload_proxies_button = tk.Button(root, text="Upload Proxies File", command=upload_proxies_file)
-upload_proxies_button.pack(pady=5)
-proxies_label = tk.Label(root, text="No proxies file uploaded.")
-proxies_label.pack(pady=5)
+upload_proxies_button.pack(pady=10)
+proxies_file_label = tk.Label(root, text="No proxies file uploaded.")
+proxies_file_label.pack()
 
-# Time range inputs
-time_frame = tk.Frame(root)
-time_frame.pack(pady=10)
-min_time_label = tk.Label(time_frame, text="Min Time (sec):")
-min_time_label.grid(row=0, column=0, padx=5)
-min_time_entry = tk.Entry(time_frame, width=5)
-min_time_entry.grid(row=0, column=1, padx=5)
-min_time_entry.insert(0, "5")
-max_time_label = tk.Label(time_frame, text="Max Time (sec):")
-max_time_label.grid(row=0, column=2, padx=5)
-max_time_entry = tk.Entry(time_frame, width=5)
-max_time_entry.grid(row=0, column=3, padx=5)
-max_time_entry.insert(0, "10")
-
-# Checkbox for headless mode
 headless_var = tk.BooleanVar()
 headless_checkbox = tk.Checkbutton(root, text="Headless Mode", variable=headless_var)
-headless_checkbox.pack(pady=5)
+headless_checkbox.pack(pady=10)
 
-# Progress bar and label
-progress_bar = ttk.Progressbar(root, orient="horizontal", length=400, mode="determinate")
-progress_bar.pack(pady=10)
-progress_label = tk.Label(root, text="Progress: 0/0")
-progress_label.pack(pady=5)
+min_overall_label = tk.Label(root, text="Min Overall Time (min):")
+min_overall_label.pack()
+min_overall_entry = tk.Entry(root, width=5)
+min_overall_entry.insert(0, "5")
+min_overall_entry.pack()
 
-# Process file button
-process_button = tk.Button(root, text="Process File", command=process_file)
+max_overall_label = tk.Label(root, text="Max Overall Time (min):")
+max_overall_label.pack()
+max_overall_entry = tk.Entry(root, width=5)
+max_overall_entry.insert(0, "10")
+max_overall_entry.pack()
+
+process_button = tk.Button(root, text="Process Links", command=process_links)
 process_button.pack(pady=10)
+
+progress_bar = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
+progress_bar.pack(pady=10)
+
+clear_button = tk.Button(root, text="Clear Data", command=clear_data)
+clear_button.pack(pady=10)
 
 root.mainloop()

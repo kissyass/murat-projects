@@ -128,6 +128,8 @@ class App:
             website_to_click = str(row[1]).strip()
             found = False
             page_attempt = 1
+            max_page_attempts = random.randint(1, 3)
+            print(max_page_attempts)
 
             try:
                 driver.get("https://www.google.com")
@@ -209,6 +211,10 @@ class App:
                         
                         driver.get("about:blank")
                         break
+                    else:
+                        print(page_attempt)
+                        if page_attempt > max_page_attempts:
+                            break
 
                     # Try to click the "Next" button with id "pnnext"
                     try:
@@ -225,12 +231,12 @@ class App:
                         
                         # Wait until the URL changes to ensure the new page is loaded
                         wait.until(EC.url_changes(current_url))
-                        time.sleep(random.uniform(3, 5))
+                        time.sleep(random.uniform(10, 30))
                     except Exception:
                         print(f"[Row {index}] Last page reached. Website '{website_to_click}' not found for search text: '{search_text}'")
                         break
 
-                time.sleep(random.uniform(4, 6))
+                time.sleep(random.uniform(20, 30))
             except Exception as row_err:
                 print(f"Error processing row {index}: {row_err}")
 
