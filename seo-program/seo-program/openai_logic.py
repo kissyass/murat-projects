@@ -28,7 +28,9 @@ def generate_seo_metadata(topic, content_type, client, language="tr"):
         3. Meta Description - max length 155 characters, starts with focus keyword.
         4. URL Slug - max length strictly 30-40 characters and not a character more, a full 100% match with main 1st focus keyword. Please make sure that there is no difference between url slug and 
         focus kw, except for the handling encode.
-        The format of the output should be as provided and generated content should be in {language} language. Please dont add any additional messages, just give the output right away. Thank you. 
+        The format of the output should be as provided and generated content should be in {language} language. Even tho the output should be in the
+        {language} language, please make the url slug in the ascii table characters not to have errors. 
+        Please dont add any additional messages, just give the output right away. Thank you. 
         The Topic: {topic}"""
 
         seo_completion = client.chat.completions.create(
@@ -265,7 +267,7 @@ def generate_image_prompts_and_images(topic, seo_metadata, content_type, client,
         The Topic for the {content_type}: {topic}
         Additional SEO information for the images:
         {seo_metadata}
-        The format of the output should be as provided. But the content of the output should be in {language} language please. 
+        The format of the output should be as provided. But the content of the output should be in {language} language please.
         Please dont add any additional messages, just the output right away. Thank you. """
 
         image_completion = client.chat.completions.create(

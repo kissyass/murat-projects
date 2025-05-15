@@ -15,9 +15,8 @@ import pandas as pd
 from docx import Document
 import time
 from tkinter import ttk
-import threading
-import queue
-from datetime import datetime, timedelta
+from image_resize import resize_and_compress_local_image
+import mimetypes
 
 class App:
     def __init__(self, root):
@@ -951,13 +950,28 @@ class App:
             try:
                 with open(image_data["local_path"], "rb") as image_file:
                     filename = os.path.basename(image_data["local_path"])
-                    filename = filename.encode('utf-8').decode('latin-1')  # Handle non-ASCII characters
-                    headers = {"Content-Disposition": f"attachment; filename={filename}"}
-                    response = requests.post(f"{self.wp_base_url}/wp-json/wp/v2/media", headers=headers, files={"file": image_file}, auth=self.auth)
+                    filename = filename.encode('utf-8').decode('latin-1') 
+                    print(filename)
+                    print("File content type:", mimetypes.guess_type(filename)[0])
+                    resize_and_compress_local_image(filename, filename)
+                    headers = {
+                    "Content-Disposition": f"attachment; filename={filename}",
+                    "Content-Type": "image/png"
+                    }
+                    # response = requests.post(f"{self.wp_base_url}/wp-json/wp/v2/media", headers=headers, files={"file": image_file}, auth=self.auth)
+                    response = requests.post(
+                        f"{self.wp_base_url}/wp-json/wp/v2/media",
+                        headers=headers,
+                        files={"file": (filename, image_file, "image/png")},  # also set here!
+                        auth=self.auth
+                    )
+                    print(response.status_code)
+                    print(response.text)
                 if response.status_code == 201:
                     image_urls.append({"url": response.json()["source_url"], "alt_text": image_data["alt_text"], "title": image_data["title"]})
             except Exception as e:
                 print(f"{self.translations['image_upload_error']}: {e}")
+                print(f"Image upload failed: {response.status_code} - {response.text}")
         return image_urls
 
     def adjust_keyword_density(self, article_html, focus_keywords, content_type="article"):
