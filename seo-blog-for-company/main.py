@@ -522,7 +522,6 @@ class App:
                 with open(image_data["local_path"], "rb") as image_file:
                     filename = os.path.basename(image_data["local_path"])
                     filename = filename.encode('utf-8').decode('latin-1')  # Handle non-ASCII characters
-                    # output_filename = f'{filename.strip('.png')}_new.png'
                     resize_and_compress_local_image(filename, filename)
                     headers = {"Content-Disposition": f"attachment; filename={filename}"}
                     response = requests.post(f"{self.wp_base_url}/wp-json/wp/v2/media", headers=headers, files={"file": image_file}, auth=self.auth)
