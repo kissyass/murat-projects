@@ -11,6 +11,8 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 from image_resize import resize_and_compress_local_image
+import time
+import random
 
 from openai_logic import generate_seo_metadata, generate_article, generate_image_prompts_and_images, generate_tags
 from openai_logic import generate_html_info, generate_article_summary
@@ -417,6 +419,7 @@ class App:
         self.progress_text.insert(tk.END, "Starting article generation...\n")
         self.root.update()
         current_year = datetime.now().year
+        print(self.current_record_table)
 
         # Process records one by one.
         while self.generating:
@@ -425,8 +428,10 @@ class App:
             if record is None:
                 self.progress_text.insert(tk.END, "No more records to process.\n")
                 break
+            print(record)
             record_id, title, content, job_location, elementor = record
             self.progress_text.insert(tk.END, f"\nProcessing Record ID: {record_id}\n")
+            print(record_id)
             
             # Check if the page exists before generating any content.
             get_response = requests.get(f"{self.wp_base_url}/wp-json/wp/v2/job-listings/{record_id}", auth=self.auth)
@@ -435,7 +440,8 @@ class App:
                 self.progress_text.insert(tk.END, f"Page for record {record_id} doesn't exist. Skipped.\n")
                 mark_record_as_used(self.current_record_table, record_id)
                 self.root.update()
-                time.sleep(1)
+                print('no exist')
+                time.sleep(2)
                 continue
             post_url = get_response.json().get("link", "none")
             url_slug = post_url.strip('/').split('/')[-1]
@@ -443,6 +449,7 @@ class App:
             # Combine the content fields to form topic and context.
             topic = title
             location = job_location
+            print(topic, location)
             # Generate SEO metadata.
             try:
                 meta_data = {"year": current_year, "url_slug": url_slug, "topic": topic, "content": content, "location": location}
@@ -461,12 +468,20 @@ class App:
                 tags_list = generate_tags(text_data, self.client)
                 tag_ids = [self.get_or_create_tag(tag) for tag in tags_list]
 
-                # Insert elementor content randomly if available.
-                if elementor.strip():
-                    article_data = insert_elementor_randomly(article_data, elementor)
+                
                 self.progress_text.insert(tk.END, "Article text and tags generated.\n")
             except Exception as e:
                 self.progress_text.insert(tk.END, f"Error generating article: {e}\n")
+                continue
+
+            try:
+                if elementor:
+                    article_data = insert_elementor_randomly(article_data, elementor.strip())
+                    self.progress_text.insert(tk.END, f"Elementors inserted\n")
+                else:
+                    self.progress_text.insert(tk.END, f"No elementors to insert\n")
+            except Exception as e:
+                self.progress_text.insert(tk.END, f"Error inserting elementors: {e}\n")
                 continue
 
             # Generate images (2 images, then duplicate each to make 4 images).
@@ -495,18 +510,23 @@ class App:
             
             # Evenly insert images in the article text.
             final_article = insert_images_evenly(article_data, image_tags)
+            print(final_article)
 
             # Simulate posting the article.
             self.progress_text.insert(tk.END, "Posting article...\n")
+            print("posting")
             try:
                 post_link = self.post_article_to_wordpress(final_article, seo_metadata, topic, tag_ids, uploaded_images, record_id)
+                print(post_link)
                 self.progress_text.insert(tk.END, f"Article posted for record {record_id}: {post_link}\n")
             except Exception as e:
                 self.progress_text.insert(tk.END, f"Error posting article for record {record_id}: {e}\n")
             # Mark record as used.
             mark_record_as_used(self.current_record_table, record_id)
+            delay = random.uniform(3*60, 8*60)
+            self.progress_text.insert(tk.END, f"Delay for {delay} seconds\n")
             self.root.update()
-            time.sleep(1)  # simulate delay
+            time.sleep(delay)  # simulate delay
 
         self.progress_text.insert(tk.END, "Generation stopped.\n")
 
@@ -533,11 +553,28 @@ class App:
     
     def get_or_create_tag(self, tag_name):
         # Check if the tag already exists
-        response = requests.get(f"{self.wp_base_url}/wp-json/wp/v2/tags", params={"search": tag_name}, auth=self.auth)
+        response = requests.get(f"{self.wp_base_url}/wp-json/wp/v2/job_listing_tag", params={"search": tag_name}, auth=self.auth)
 
         if response.status_code == 200 and response.json():
             # Tag exists, return its ID
-            return response.json()[0]["id"]
+            # return response.json()[0]["id"]
+            # Tag exists — grab its ID...
+            term_id = response.json()[0]["id"]
+
+            # ...and re–write its Rank Math meta
+            update_payload = {
+                "description": tag_name,
+                "meta": {
+                    "rank_math_focus_keyword": tag_name
+                }
+            }
+            update_resp = requests.put(
+                f"{self.wp_base_url}/wp-json/wp/v2/job_listing_tag/{term_id}",
+                json=update_payload,
+                auth=self.auth
+            )
+            update_resp.raise_for_status()
+            return term_id
         
         # If the tag does not exist, create it with Rank Math meta data included
         create_data = {
@@ -550,7 +587,7 @@ class App:
         
         # Tag doesn't exist, create it
         response = requests.post(
-            f"{self.wp_base_url}/wp-json/wp/v2/tags",
+            f"{self.wp_base_url}/wp-json/wp/v2/job_listing_tag",
             json=create_data,
             auth=self.auth
         )
@@ -567,6 +604,7 @@ class App:
         try:
             # Retrieve existing listing data by record_id.
             get_response = requests.get(f"{self.wp_base_url}/wp-json/wp/v2/job-listings/{record_id}", auth=self.auth)
+            print(get_response)
             if get_response.status_code != 200:
                 messagebox.showerror("Error", f"Failed to retrieve listing with record id {record_id}: {get_response.text}")
                 return post_url
@@ -589,7 +627,8 @@ class App:
                 "content": final_text,
                 "status": "publish",
                 # "slug": seo_metadata["URL Slug"],
-                # "tags": tag_ids,
+                "tags": tag_ids,
+                "job_listing_tag": tag_ids,
                 "meta": {
                     "rank_math_title": seo_metadata["SEO Title"],
                     "rank_math_description": seo_metadata["Meta Description"],
@@ -600,6 +639,7 @@ class App:
             # Update the existing listing.
             update_response = requests.put(f"{self.wp_base_url}/wp-json/wp/v2/job-listings/{record_id}", 
                                             json=post_data, auth=self.auth)
+            print(update_response)
             if update_response.status_code == 200:
                 post_url = update_response.json().get("link", "none")
                 # Update featured image for the listing.

@@ -104,7 +104,7 @@ def generate_article_summary(link, client):
                 should have headings h2, h3 and h4. The text has to promote the company. Only give me the text right away, no need for any 
                 additional messages. Make the summary engaging, so that potential customers would want to read it all.
                 At the end of the summary add text Read more... with the link {link}, make text in turkish and link HTML formatted with <a> tag.
-                Please make sure that output is in HTML format and has all necessarytags and divs and so on. 
+                Please make sure that output is in HTML format and has all necessary tags and divs and so on. 
                 No need for additional messages.
                 And make the text in turkish language please."""
 
@@ -290,3 +290,5 @@ def generate_image_prompts_and_images(topic, seo_metadata, article, client):
     except Exception as e:
         print(f"Error generating image prompts and metadata: {e}")
         raise
+
+    
